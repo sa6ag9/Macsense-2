@@ -2,13 +2,14 @@
 
 **Last verified:** 2026-11-01 (live API state; audit evidence 2026-10-29; merge-train evidence 2026-11-01)
 **Canonical branch:** main @ 0b62de1849
-**Repository state: ARCHIVED at the account level (read-only)**
+**Repository state: UNARCHIVED (verified live 2026-11-04: `archived` = false; the archive recorded below has been lifted)**
 
-> **Delivery note:** because this repository is archived and
-> read-only, this refresh could not be delivered by pull request.
-> It is delivered locally with the 2026-11-01 refresh-pass report
-> (`~/workspace/estate-audit/GROUND-TRUTH-REFRESH-PASS-2026-11-01.md`)
-> and takes effect in-repo if/when the repo is unarchived.
+> **Delivery note (historical):** this refresh was prepared
+> while the repository was archived and read-only, and was
+> delivered locally with the 2026-11-01 refresh-pass report
+> (`~/workspace/estate-audit/GROUND-TRUTH-REFRESH-PASS-2026-11-01.md`).
+> It has since landed in-repo (the post-unarchive landing); the
+> repository is unarchived as of the 2026-11-04 live check.
 
 ## What this repo is
 
@@ -21,11 +22,14 @@ Savage.
 
 ## The archive — unexplained
 
-This repository is **archived at the account level**. No D1–D12
-ruling archives it (D2 archived durak only), and the 2026-11-01
-merge train treated it as a live repo. The archive's origin is not
-in any record available to this pass. Flagged for Savage: archive
-by intent, or by accident?
+This repository was **archived at the account level** when the
+2026-11-01 pass recorded it. No D1–D12 ruling archives it (D2
+archived durak only), and the 2026-11-01 merge train treated it
+as a live repo. The archive's origin is not in any record
+available to this pass. **Update 2026-11-04: the repository is
+unarchived (live `archived` = false)** — the question of the
+archive's origin remains as recorded; the state itself is
+resolved.
 
 ## Verified current state
 
@@ -58,14 +62,17 @@ Nothing — the train parked this repo's only open PR (below).
   checks), diff read in full by the train, mergeable — but the
   merge API returned 404: branch protection blocks this token, and
   the branch's vercel.json build/install-command removals need
-  author confirmation. While the repo is archived, merges are
-  impossible regardless. Unblock: unarchive (Savage's call) +
-  protection change or UI merge + vercel.json confirmation.
+  author confirmation. (The archived-state sentence that stood
+  here is superseded: the repo is unarchived, verified live
+  2026-11-04, and #92 remains open, unmerged.) Unblock:
+  protection change or UI merge + vercel.json confirmation —
+  the vercel.json ruling is Savage's.
 
 ## Where it is going
 
-No direction ruled by Savage for this repo. The archive question
-above is the open fork.
+No direction ruled by Savage for this repo. The open fork is
+PR #92's vercel.json change (Savage's ruling); the archive
+question above is closed as a state matter.
 
 ## Estate rule
 
