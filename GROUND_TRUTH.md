@@ -39,9 +39,23 @@ resolved.
   precondition; without it the smoke test fails ECONNREFUSED — a
   harness precondition, not a code defect). Server **7/7** incl.
   build.
-  *Carried labeled:* the corrections appendix records an install
-  `ci_rc=1` against a dossier line claiming rc=0 for one install
-  path — recorded, not reconciled.
+  *Install record — reconciled 2026-11-09 (M-3):* the corrections
+  appendix recorded an install `ci_rc=1` against a dossier line
+  claiming rc=0 for one install path; neither source record is
+  preserved in this repo, so the path was rerun against the
+  current tree. Every install path the tree defines returns
+  rc=0: `web/` `npm install` rc=0 and `server/` `npm ci` rc=0
+  (direct reruns, 2026-11-09, with web tests 44/44 and server
+  tests 7/7 passing on the installed trees), and the
+  Android/Gradle path's CI job (`build-test`, incl. Gradle
+  setup and dependency resolution) is recorded **success** at
+  the current head (check runs, 2026-11-04 batch, read via
+  API). The dossier's rc=0 is the record that matches the tree;
+  the appendix's `ci_rc=1` is not reproducible on any install
+  path and is superseded. The one failing job in that CI batch
+  is `release`, which failed at *Assemble release APK
+  (unsigned)* — a build step, not an install step (carried
+  under M-2).
 - **Android: NOT RUN** — no Java/Android SDK in the audit
   environment. The Android surface is CODED only.
 - The gateway refuses to start without GEMINI_API_KEY.
