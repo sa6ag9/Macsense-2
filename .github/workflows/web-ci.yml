@@ -13,15 +13,35 @@ jobs:
   web-test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      test_outcome: ${{ steps.web-tests.outcome }}
+      validate_outcome: ${{ steps.web-validate.outcome }}
+      studio_outcome: ${{ steps.web-studio.outcome }}
+      tests: ${{ steps.web-counts.outputs.tests }}
+      passed: ${{ steps.web-counts.outputs.passed }}
+      failed: ${{ steps.web-counts.outputs.failed }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Run browser-domain tests
+        id: web-tests
         working-directory: web
-        run: npm test
+        # tee keeps the runner output in a file so the counts step below
+        # can report the measured suite counts to the verification
+        # ledger; pipefail (Actions' default) preserves the exit code.
+        run: npm test 2>&1 | tee ../web-test-output.log
+      - name: Export web test counts for the verification ledger
+        id: web-counts
+        if: always()
+        run: |
+          extract() { grep -oE "$1 [0-9]+" web-test-output.log 2>/dev/null | tail -1 | grep -oE '[0-9]+$' || true; }
+          echo "tests=$(extract tests)" >> "$GITHUB_OUTPUT"
+          echo "passed=$(extract pass)" >> "$GITHUB_OUTPUT"
+          echo "failed=$(extract fail)" >> "$GITHUB_OUTPUT"
       - name: Validate production shell
+        id: web-validate
         run: |
           test -f web/index.html
           test -f web/manifest.webmanifest
@@ -39,6 +59,7 @@ jobs:
             exit 1
           fi
       - name: Start static studio
+        id: web-studio
         working-directory: web
         run: |
           python3 -m http.server 4173 >/tmp/macsense-web.log 2>&1 &
@@ -54,22 +75,43 @@ jobs:
   gateway-build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      build_outcome: ${{ steps.gw-build.outcome }}
+      test_outcome: ${{ steps.gw-test.outcome }}
+      docker_build_outcome: ${{ steps.docker-build.outcome }}
+      docker_boot_outcome: ${{ steps.docker-boot.outcome }}
+      tests: ${{ steps.gw-counts.outputs.tests }}
+      passed: ${{ steps.gw-counts.outputs.passed }}
+      failed: ${{ steps.gw-counts.outputs.failed }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Build gateway TypeScript
+        id: gw-build
         working-directory: server
         run: |
           npm install
           npm run build
       - name: Test gateway
+        id: gw-test
         working-directory: server
-        run: npm test
+        # tee: see the web-test job above.
+        run: npm test 2>&1 | tee ../server-test-output.log
+      - name: Export gateway test counts for the verification ledger
+        id: gw-counts
+        if: always()
+        run: |
+          extract() { grep -oE "$1 [0-9]+" server-test-output.log 2>/dev/null | tail -1 | grep -oE '[0-9]+$' || true; }
+          echo "tests=$(extract tests)" >> "$GITHUB_OUTPUT"
+          echo "passed=$(extract pass)" >> "$GITHUB_OUTPUT"
+          echo "failed=$(extract fail)" >> "$GITHUB_OUTPUT"
       - name: Build combined production image
+        id: docker-build
         run: docker build -t macsense-studio:ci .
       - name: Boot combined studio container
+        id: docker-boot
         run: |
           docker run -d --rm --name macsense-ci -p 8080:8080 \
             -e GEMINI_API_KEY=ci-placeholder-not-a-real-key \
@@ -86,3 +128,86 @@ jobs:
       - name: Stop combined studio container
         if: always()
         run: docker stop macsense-ci 2>/dev/null || true
+
+  # Records this run in verification/ledger.jsonl and commits the
+  # appended ledger back to main, so "what ran, when, with what
+  # outcome" is a property of the tree (see verification/README.md).
+  # Only this job gets contents: write (it overrides the workflow-wide
+  # contents: read above). continue-on-error + the guarded commit step
+  # guarantee the recording can never fail the build it records.
+  verification-ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [web-test, gateway-build]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Record web-test entry
+        env:
+          SURFACE: web
+          JOB: web-test
+          RESULT: ${{ needs.web-test.result }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+          STEPS_JSON: >-
+            [{"name": "Run browser-domain tests", "outcome": "${{ needs.web-test.outputs.test_outcome }}"},
+             {"name": "Validate production shell", "outcome": "${{ needs.web-test.outputs.validate_outcome }}"},
+             {"name": "Start static studio", "outcome": "${{ needs.web-test.outputs.studio_outcome }}"}]
+          TESTS: ${{ needs.web-test.outputs.tests }}
+          PASSED: ${{ needs.web-test.outputs.passed }}
+          FAILED: ${{ needs.web-test.outputs.failed }}
+        run: |
+          if [ -n "$TESTS" ] && [ -n "$PASSED" ] && [ -n "$FAILED" ]; then
+            export COUNTS_JSON="{\"tests\": $TESTS, \"passed\": $PASSED, \"failed\": $FAILED}"
+          fi
+          node verification/build-entry.mjs
+      - name: Record gateway-build entry
+        env:
+          SURFACE: server
+          JOB: gateway-build
+          RESULT: ${{ needs.gateway-build.result }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+          STEPS_JSON: >-
+            [{"name": "Build gateway TypeScript", "outcome": "${{ needs.gateway-build.outputs.build_outcome }}"},
+             {"name": "Test gateway", "outcome": "${{ needs.gateway-build.outputs.test_outcome }}"},
+             {"name": "Build combined production image", "outcome": "${{ needs.gateway-build.outputs.docker_build_outcome }}"},
+             {"name": "Boot combined studio container", "outcome": "${{ needs.gateway-build.outputs.docker_boot_outcome }}"}]
+          TESTS: ${{ needs.gateway-build.outputs.tests }}
+          PASSED: ${{ needs.gateway-build.outputs.passed }}
+          FAILED: ${{ needs.gateway-build.outputs.failed }}
+        run: |
+          if [ -n "$TESTS" ] && [ -n "$PASSED" ] && [ -n "$FAILED" ]; then
+            export COUNTS_JSON="{\"tests\": $TESTS, \"passed\": $PASSED, \"failed\": $FAILED}"
+          fi
+          node verification/build-entry.mjs
+      - name: Commit the appended ledger
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add verification/ledger.jsonl
+          if git diff --cached --quiet; then
+            echo "ledger unchanged; nothing to commit"
+            exit 0
+          fi
+          # [skip ci]: the ledger commit must not retrigger the workflows.
+          git commit -m "verification-ledger: record ${{ github.workflow }} run ${{ github.run_id }} [skip ci]"
+          pushed=0
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then pushed=1; break; fi
+            git pull --rebase origin main || break
+          done
+          if [ "$pushed" != "1" ]; then
+            echo "::warning::verification ledger commit could not be pushed; the run's entries were not recorded"
+          fi
+          exit 0

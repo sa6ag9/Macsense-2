@@ -9,6 +9,13 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    outputs:
+      lint_outcome: ${{ steps.android-lint.outcome }}
+      unit_outcome: ${{ steps.android-unit.outcome }}
+      assemble_outcome: ${{ steps.android-assemble.outcome }}
+      tests: ${{ steps.android-counts.outputs.tests }}
+      passed: ${{ steps.android-counts.outputs.passed }}
+      failed: ${{ steps.android-counts.outputs.failed }}
     steps:
       - uses: actions/checkout@v4
 
@@ -41,13 +48,37 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
       - name: Lint
+        id: android-lint
         run: ./gradlew lint --stacktrace
 
       - name: Unit tests
+        id: android-unit
         run: ./gradlew testDebugUnitTest --stacktrace
 
       - name: Assemble debug APK
+        id: android-assemble
         run: ./gradlew assembleDebug --stacktrace
+
+      - name: Export unit test counts for the verification ledger
+        id: android-counts
+        if: always()
+        run: |
+          python3 - <<'PYEOF' >> "$GITHUB_OUTPUT"
+          import glob, xml.etree.ElementTree as ET
+          tests = failures = errors = skipped = 0
+          for path in glob.glob('app/build/test-results/**/*.xml', recursive=True):
+              try:
+                  root = ET.parse(path).getroot()
+              except Exception:
+                  continue
+              tests += int(root.get('tests', 0))
+              failures += int(root.get('failures', 0))
+              errors += int(root.get('errors', 0))
+              skipped += int(root.get('skipped', 0))
+          print(f"tests={tests}")
+          print(f"passed={tests - failures - errors - skipped}")
+          print(f"failed={failures + errors}")
+          PYEOF
 
       - name: Upload test reports
         if: always()
@@ -66,6 +97,8 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: [build-test]
+    outputs:
+      assemble_outcome: ${{ steps.release-assemble.outcome }}
     steps:
       - uses: actions/checkout@v4
 
@@ -90,6 +123,7 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
       - name: Assemble release APK (unsigned)
+        id: release-assemble
         run: ./gradlew assembleRelease --stacktrace
 
       - name: Upload release APK
@@ -105,3 +139,78 @@ jobs:
       - name: Dependency review
         uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'
+
+  # Records this run in verification/ledger.jsonl and commits the
+  # appended ledger back to main, so "what ran, when, with what
+  # outcome" is a property of the tree (see verification/README.md).
+  # This workflow has no top-level permissions block; the write grant
+  # below is scoped to this job only. continue-on-error + the guarded
+  # commit step guarantee the recording can never fail the build it
+  # records. Gateway behavior is not touched by this job.
+  verification-ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [build-test, release]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Record build-test entry
+        env:
+          SURFACE: android
+          JOB: build-test
+          RESULT: ${{ needs.build-test.result }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+          STEPS_JSON: >-
+            [{"name": "Lint", "outcome": "${{ needs.build-test.outputs.lint_outcome }}"},
+             {"name": "Unit tests", "outcome": "${{ needs.build-test.outputs.unit_outcome }}"},
+             {"name": "Assemble debug APK", "outcome": "${{ needs.build-test.outputs.assemble_outcome }}"}]
+          TESTS: ${{ needs.build-test.outputs.tests }}
+          PASSED: ${{ needs.build-test.outputs.passed }}
+          FAILED: ${{ needs.build-test.outputs.failed }}
+        run: |
+          if [ -n "$TESTS" ] && [ "$TESTS" != "0" ] && [ -n "$PASSED" ] && [ -n "$FAILED" ]; then
+            export COUNTS_JSON="{\"tests\": $TESTS, \"passed\": $PASSED, \"failed\": $FAILED}"
+          fi
+          node verification/build-entry.mjs
+      - name: Record release entry
+        if: needs.release.result != 'skipped'
+        env:
+          SURFACE: android
+          JOB: release
+          RESULT: ${{ needs.release.result }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+          STEPS_JSON: >-
+            [{"name": "Assemble release APK (unsigned)", "outcome": "${{ needs.release.outputs.assemble_outcome }}"}]
+        run: node verification/build-entry.mjs
+      - name: Commit the appended ledger
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add verification/ledger.jsonl
+          if git diff --cached --quiet; then
+            echo "ledger unchanged; nothing to commit"
+            exit 0
+          fi
+          # [skip ci]: the ledger commit must not retrigger the workflows.
+          git commit -m "verification-ledger: record ${{ github.workflow }} run ${{ github.run_id }} [skip ci]"
+          pushed=0
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then pushed=1; break; fi
+            git pull --rebase origin main || break
+          done
+          if [ "$pushed" != "1" ]; then
+            echo "::warning::verification ledger commit could not be pushed; the run's entries were not recorded"
+          fi
+          exit 0
