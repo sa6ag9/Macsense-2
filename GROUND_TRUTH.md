@@ -88,6 +88,52 @@ No direction ruled by Savage for this repo. The open fork is
 PR #92's vercel.json change (Savage's ruling); the archive
 question above is closed as a state matter.
 
+## Verification ledger (added 2026-11-09)
+
+The M-3 dispute above happened because this repo kept no durable
+record of its own verification: two documents disagreed and neither
+source record survived in-repo. That class of dispute is now
+settled by reading the tree. `verification/ledger.jsonl` is an
+append-only, machine-readable ledger — one JSON entry per
+measurement, each recording surface (`web`/`server`/`android`),
+job, workflow run id, commit, timestamp, per-step outcomes, the
+suite counts the job itself measured (or `null` when no count was
+preserved — never reconstructed), and a `source` field
+(`ci`, `ci-evidence`, `local`, `local-reconciliation`) so
+provenance is never blurred.
+
+- **Writers:** the `verification-ledger` job in
+  `.github/workflows/ci.yml` (android) and
+  `.github/workflows/web-ci.yml` (web, server) runs after the
+  measured jobs on pushes to `main` and commits the appended
+  ledger back with the built-in `GITHUB_TOKEN` — the write grant
+  (`contents: write`) is scoped to that job only (in `web-ci.yml`
+  it overrides the workflow-wide `contents: read` for that job
+  alone). The recording can never fail the build it records: the
+  entry builder warns instead of throwing, the job is
+  `continue-on-error`, and the commit step exits 0 even if the
+  push cannot land. Failed jobs are recorded faithfully as
+  failures. Gateway behavior is untouched by this machinery.
+- **Reader:** `node verification/read-ledger.mjs` renders the
+  latest state per surface/job; `--check` exits 1 when any
+  surface's latest entry is a failure. Fixture tests:
+  `node --test verification/read-ledger.test.mjs`. Full format
+  documentation: `verification/README.md`.
+- **Seed (2026-11-09):** the first entries record the M-3
+  reconciliation state — web 44/44 and server 7/7 measured
+  locally on the post-M-3 tree (`local-reconciliation`), and the
+  android jobs from CI check-run evidence at `719c066a`
+  (`ci-evidence`: `build-test` success; `release` failure at
+  *Assemble release APK (unsigned)*, the M-2 item). The ledger's
+  first recorded failure is therefore deliberate: the record says
+  what is true. As of the seed, `read-ledger.mjs --check` exits 1
+  on android/release — that is M-2's state, not a ledger defect.
+- Not wired: `azure-webapp.yml` and
+  `vercel-production-deploy.yml` also execute the web suite as
+  part of deployment; the ledger's web surface is recorded by
+  Web Studio CI on the push to `main` that precedes any deploy
+  of that commit.
+
 ## Estate rule
 
 Update this file after any significant repo change. No claims without verification.
