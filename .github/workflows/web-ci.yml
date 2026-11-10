@@ -5,6 +5,7 @@ on:
     branches: [main, 'web-parity/**']
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -139,7 +140,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [web-test, gateway-build]
-    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     continue-on-error: true
     permissions:
       contents: write
