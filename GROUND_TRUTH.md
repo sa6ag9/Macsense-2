@@ -105,7 +105,8 @@ provenance is never blurred.
 - **Writers:** the `verification-ledger` job in
   `.github/workflows/ci.yml` (android) and
   `.github/workflows/web-ci.yml` (web, server) runs after the
-  measured jobs on pushes to `main` and commits the appended
+  measured jobs on pushes to `main` and on manual
+  (`workflow_dispatch`) runs on `main`, and commits the appended
   ledger back with the built-in `GITHUB_TOKEN` — the write grant
   (`contents: write`) is scoped to that job only (in `web-ci.yml`
   it overrides the workflow-wide `contents: read` for that job
@@ -133,6 +134,37 @@ provenance is never blurred.
   part of deployment; the ledger's web surface is recorded by
   Web Studio CI on the push to `main` that precedes any deploy
   of that commit.
+
+- **On-demand exercise + commit-back state (redo,
+  2026-11-10):** PR #97 added `workflow_dispatch` to both
+  workflows and extended the `verification-ledger` job guards
+  to admit dispatched runs on `refs/heads/main` alongside
+  pushes. That half is proven: dispatched runs Web Studio CI
+  42784847843 (success) and CI 42784841481 (success) executed
+  their ledger jobs the same day, and `build-entry.mjs` built
+  genuine `"source": "ci"` entries for them (job logs:
+  "ledger: recorded web/web-test success for run 42784847843",
+  "ledger: recorded server/gateway-build success for run
+  42784847843", "ledger: recorded android/build-test success
+  for run 42784841481"; the merge-push runs 42784770703 /
+  42784770734 built theirs as well). **None of those entries is
+  in this ledger, and the count on `main` is unchanged: 4
+  entries, 0 with `"source": "ci"`.** The commit-back push is
+  rejected by branch protection on `main` — GH006, quoted from
+  the job logs: "Changes must be made through a pull request"
+  and "2 of 2 required status checks are expected". The
+  `github-actions[bot]` token cannot satisfy the required
+  approving review or the required status checks on a direct
+  push, and the commit step's warn-and-exit-0 design swallowed
+  every rejection, so the loop reported success while recording
+  nothing. This is the second, deeper reason no `ci` entry has
+  ever landed; the first (no dispatch path, push-only guard) is
+  fixed. Landing entries now requires a governance decision
+  outside workflow config — a push bypass for the Actions app,
+  a dedicated ledger branch, or PR-based recording — which is
+  Savage's to rule. Until then the loop is exercisable on
+  demand and its entries are genuinely built in CI, but they
+  do not persist to `main`.
 
 ## Estate rule
 
