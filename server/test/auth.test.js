@@ -53,12 +53,16 @@ function runMiddlewareScenarios(env) {
   return JSON.parse(result.stdout);
 }
 
-test("auth: no MACSENSE_CLIENT_TOKEN configured -> gate is a pass-through", () => {
+test("auth: no MACSENSE_CLIENT_TOKEN configured -> gate fails closed with 503 (audit M-1)", () => {
   const outcome = runMiddlewareScenarios({ GEMINI_API_KEY: "test-key" });
-  assert.equal(outcome.noHeader.nextCalled, true);
-  assert.equal(outcome.wrongToken.nextCalled, true);
-  assert.equal(outcome.noHeader.statusCode, null);
-  assert.equal(outcome.wrongToken.statusCode, null);
+  for (const scenario of ["noHeader", "wrongToken", "correctToken"]) {
+    assert.equal(outcome[scenario].nextCalled, false, `${scenario} must not call next()`);
+    assert.equal(outcome[scenario].statusCode, 503);
+    assert.deepEqual(outcome[scenario].body, {
+      error: "Client token gate is not configured",
+      code: "gate_not_configured",
+    });
+  }
 });
 
 test("auth: token configured -> missing or wrong bearer gets 401 unauthorized", () => {

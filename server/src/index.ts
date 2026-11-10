@@ -64,6 +64,6 @@ app.use((_req, res) => {
   res.status(404).json({ error: "Not found", code: "not_found" });
 });
 
-app.listen(config.port, () => {
-  console.log(`macsense-studio listening on port ${config.port}; web=${existsSync(webIndex) ? webRoot : "missing"}`);
+app.listen(config.port, config.host, () => {
+  console.log(`macsense-studio listening on ${config.host}:${config.port}; web=${existsSync(webIndex) ? webRoot : "missing"}`);
 });

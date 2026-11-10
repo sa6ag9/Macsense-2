@@ -66,6 +66,83 @@ resolved.
   live state UNREACHED).
 - Products ON now: 0 customer-usable.
 
+## Gateway auth gate — M-1 fail-open FIXED (2026-11-10, PR pending merge)
+
+The estate audit's M-1 (HIGH) finding: `requireClientToken`
+(`server/src/middleware/auth.ts`) was a **no-op when
+`MACSENSE_CLIENT_TOKEN` was unset** — documented in-code as a
+rollout convenience — and it was the only gate on
+`/v1/ari/chat`, the route that spends the server-side Gemini
+key. The gateway refused to start without `GEMINI_API_KEY`, so
+the natural misconfiguration was a publicly reachable,
+unauthenticated proxy. Reproduced on the pre-fix tree before
+changing anything: the server booted tokenless and an
+unauthenticated `POST /v1/ari/chat` passed the gate and reached
+the Gemini upstream call (502 `upstream_error` from the route,
+i.e. the request got all the way through); the suite even
+pinned the pass-through as expected behavior.
+
+The gateway now **fails closed**, in three layers, all declared
+in `server/src/config.ts` / `server/src/middleware/auth.ts`:
+
+1. **Boot refusal in production:** with
+   `NODE_ENV=production`, config throws at import time when
+   `MACSENSE_CLIENT_TOKEN` is unset or blank — same fail-fast
+   pattern the code already used for `GEMINI_API_KEY`. The
+   process never listens.
+2. **Loopback containment otherwise:** the server binds
+   `HOST` (new config, default `127.0.0.1`; previously it bound
+   every interface). Outside production, a non-loopback `HOST`
+   without a client token also refuses to start.
+3. **Gate refuses, never passes:** `requireClientToken` with
+   no token configured answers **503
+   `{error, code: "gate_not_configured"}`** instead of calling
+   `next()`. That state is reachable only on a loopback-bound
+   non-production server, and even there no chat request
+   reaches the upstream.
+
+Declared ungated surfaces, unchanged and named: `GET /health`
+and `GET /readyz` (liveness/readiness probes, no key spend),
+and the static web studio. With a token configured, behavior
+is unchanged: missing/wrong bearer → 401 `unauthorized`;
+correct bearer passes. CORS, rate limiting, and the Gemini
+client are untouched.
+
+Tests: server suite 7 → **14 passing** (tsc build + `node
+--test`): the pre-existing pass-through test was rewritten to
+pin the 503 refusal (the fix's whole point is that the old
+expectation was the defect; no other existing test was
+modified in substance — one config default assertion updated
+for `clientToken` `null` → `""` plus the new `host` field),
+five new config cases (production unset/blank token refuses,
+production with token boots, non-loopback tokenless refuses,
+HOST honored with token), and a new end-to-end file
+(`server/test/gateway-fail-closed.test.js`) that boots the
+real compiled server and probes it over HTTP. Verified
+additionally by direct probes of the built server: production
+tokenless boot exits non-zero naming `MACSENSE_CLIENT_TOKEN`;
+tokenless loopback boot serves `/health` 200 and refuses
+`/v1/ari/chat` 503.
+
+**Refused / not built, named plainly:**
+
+- The audit's alternative "bind to localhost by default" was
+  adopted as the containment layer, not as a substitute for the
+  token: a production deploy behind a platform router
+  (Vercel/Azure configs exist in-tree) needs the interface
+  reachable, so production requires the token — both halves of
+  the audit's fix, each where it works.
+- No per-route or IP allowlist was added: none is declared
+  anywhere in the code, and inventing one would change the
+  product's access model without a ruling.
+- The Gemini client has no upstream timeout (a hung upstream
+  holds the request open); that is a separate latent gap, not
+  M-1, and was left untouched rather than bundled silently.
+- The stale header block at the top of this file (canonical
+  head `0b62de1849`, tree 316 blobs) predates the current main
+  (`1dc2b8565`, 323 blobs); it is a pre-existing staleness, not
+  corrected here beyond this section.
+
 ## Merged in the 2026-11-01 train
 
 Nothing — the train parked this repo's only open PR (below).

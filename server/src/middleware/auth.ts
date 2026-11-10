@@ -2,13 +2,15 @@ import { NextFunction, Request, Response } from "express";
 import { config } from "../config";
 
 /**
- * Optional bearer-token gate. If MACSENSE_CLIENT_TOKEN is unset, this is a no-op so the
- * gateway keeps working during local development / initial rollout. Once the Android
- * client is updated to send `Authorization: Bearer <token>`, set the env var to enforce it.
+ * Bearer-token gate for /v1/ari/chat. Fails closed (audit M-1): when no client token is
+ * configured this refuses every request with 503 instead of passing traffic through.
+ * That state is reachable only on a loopback-bound non-production server — config.ts
+ * refuses to start in production mode, or on a non-loopback bind, without
+ * MACSENSE_CLIENT_TOKEN — so the unauthenticated proxy can never be exposed.
  */
 export function requireClientToken(req: Request, res: Response, next: NextFunction): void {
   if (!config.clientToken) {
-    next();
+    res.status(503).json({ error: "Client token gate is not configured", code: "gate_not_configured" });
     return;
   }
 
